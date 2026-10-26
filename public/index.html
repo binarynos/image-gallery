@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gallery</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">▣ Gallery</span>
+      <nav class="breadcrumb" id="breadcrumb" aria-label="breadcrumb"></nav>
+    </div>
+    <div class="topbar-right">
+      <button class="btn-toggle" id="toggleMasonry" title="Toggle masonry">
+        <!-- <span class="icon-eye"></span> -->
+        <span class="btn-label">Toggle masonry</span>
+      </button>
+      <button class="btn-toggle" id="toggleNonImages" title="Toggle non-image files">
+        <span class="icon-eye"></span>
+        <span class="btn-label">Hide files</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── Main content ─────────────────────────────────────────────────────── -->
+  <main class="main">
+    <div class="status-bar" id="statusBar"></div>
+    <div class="grid" id="grid"></div>
+    <div class="pagination" id="pagination"></div>
+  </main>
+
+  <!-- ── Lightbox ─────────────────────────────────────────────────────────── -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
+    <div class="lb-backdrop" id="lbBackdrop"></div>
+
+    <button class="lb-close" id="lbOpenExplorer" aria-label="Open explorer">📁</button>
+    <button class="lb-close" id="lbClose" aria-label="Close">✕</button>
+    <button class="lb-arrow lb-prev" id="lbPrev" aria-label="Previous image">‹</button>
+    <button class="lb-arrow lb-next" id="lbNext" aria-label="Next image">›</button>
+
+    <div class="lb-stage" id="lbStage">
+      <div class="lb-img-wrap" id="lbImgWrap">
+        <img class="lb-img" id="lbImg" src="" alt="" draggable="false" />
+      </div>
+      <div class="lb-spinner" id="lbSpinner"></div>
+    </div>
+
+    <!-- Zoom / rotate toolbar -->
+    <div class="lb-toolbar" id="lbToolbar">
+      <button class="lb-tool" id="lbZoomOut" title="Zoom out (-)">−</button>
+      <span class="lb-zoom-level" id="lbZoomLevel">100%</span>
+      <button class="lb-tool" id="lbZoomIn" title="Zoom in (+)">+</button>
+      <span class="lb-tool-sep"></span>
+      <button class="lb-tool" id="lbRotateLeft" title="Rotate left (Shift+R)">⟲</button>
+      <button class="lb-tool" id="lbRotateRight" title="Rotate right (R)">⟳</button>
+      <span class="lb-tool-sep"></span>
+      <button class="lb-tool" id="lbReset" title="Reset view (0)">⤾ Reset</button>
+    </div>
+
+    <div class="lb-caption" id="lbCaption"></div>
+    <div class="lb-counter" id="lbCounter"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
