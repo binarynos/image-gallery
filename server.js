@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const tagDb = require('./lib/db');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
@@ -44,6 +45,16 @@ function isImage(name) {
   return IMAGE_EXTS.has(path.extname(name).toLowerCase());
 }
 
+// The tag database lives in the gallery root (gallery.db, plus its WAL /
+// shared-memory sidecar files) — hide it from folder listings so it
+// doesn't clutter the gallery itself.
+function isTagDbFile(name) {
+  return name === tagDb.DB_FILENAME
+    || name === `${tagDb.DB_FILENAME}-wal`
+    || name === `${tagDb.DB_FILENAME}-shm`
+    || name === `${tagDb.DB_FILENAME}-journal`;
+}
+
 function safePath(requestedPath) {
   // Decode and normalise, then ensure it stays inside ROOT_DIR
   const decoded = decodeURIComponent(requestedPath || '');
@@ -70,6 +81,64 @@ function sendError(res, status, message) {
   sendJSON(res, { error: message }, status);
 }
 
+function readBody(req, maxBytes = 1e6) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    let tooBig = false;
+    req.on('data', (chunk) => {
+      if (tooBig) return;
+      data += chunk;
+      if (data.length > maxBytes) {
+        tooBig = true;
+        reject(new Error('Body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => { if (!tooBig) resolve(data); });
+    req.on('error', reject);
+  });
+}
+
+let _db = null;
+function getDb() {
+  if (!_db) _db = tagDb.openDb(ROOT_DIR);
+  return _db;
+}
+
+// ── Filesystem image index (for filename search) ───────────────────────────────
+// The tag database only has a row for an image once it's been tagged, so
+// filename search needs its own view of every image actually on disk.
+// Walking all 10k-ish images on every keystroke would be wasteful, so this
+// is built once and cached for a short TTL — long enough to make repeated
+// searches cheap, short enough that newly dropped-in files show up without
+// a restart.
+const FS_INDEX_TTL_MS = 60_000;
+let fsIndexCache = { builtAt: 0, paths: [] };
+
+function walkImages(dirAbs, relDir, out) {
+  let entries;
+  try { entries = fs.readdirSync(dirAbs, { withFileTypes: true }); }
+  catch { return; }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    if (e.isDirectory()) {
+      walkImages(path.join(dirAbs, e.name), relDir ? `${relDir}/${e.name}` : e.name, out);
+    } else if (e.isFile() && isImage(e.name)) {
+      out.push(relDir ? `${relDir}/${e.name}` : e.name);
+    }
+  }
+}
+
+function getFsImageIndex() {
+  const now = Date.now();
+  if (now - fsIndexCache.builtAt > FS_INDEX_TTL_MS) {
+    const paths = [];
+    walkImages(ROOT_DIR, '', paths);
+    fsIndexCache = { builtAt: now, paths };
+  }
+  return fsIndexCache.paths;
+}
+
 // ── Route: GET /api/list?path=...&page=N ──────────────────────────────────────
 function handleList(req, res, url) {
   const relPath = url.searchParams.get('path') || '';
@@ -92,6 +161,7 @@ function handleList(req, res, url) {
 
   for (const e of entries) {
     if (e.name.startsWith('.')) continue; // skip hidden
+    if (isTagDbFile(e.name)) continue; // skip the tag database itself
     if (e.isDirectory()) {
       dirs.push({ name: e.name, type: 'dir' });
     } else if (e.isFile()) {
@@ -200,6 +270,87 @@ async function handleFile(req, res, url) {
   }
 }
 
+// ── Route: GET /api/tags?limit=N ──────────────────────────────────────────────
+// Most common tags, for the "browse tags" modal.
+function handleTags(req, res, url) {
+  const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get('limit') || '40', 10)));
+  try {
+    const tags = tagDb.getTopTags(getDb(), limit);
+    sendJSON(res, { tags });
+  } catch (err) {
+    sendError(res, 500, `Tag database error: ${err.message}`);
+  }
+}
+
+// ── Route: GET /api/search?q=... ──────────────────────────────────────────────
+// Searches filenames and tags across the whole gallery. Supports `tag:name`
+// tokens for exact tag filtering (space-separated tokens are ANDed).
+function handleSearch(req, res, url) {
+  const q = url.searchParams.get('q') || '';
+  if (!q.trim()) return sendJSON(res, { query: q, items: [], imageCount: 0 });
+
+  try {
+    const fsPaths = getFsImageIndex();
+    const paths = tagDb.searchImages(getDb(), q, fsPaths, 300);
+    const items = paths.map((p) => tagDb.splitRelPath(p));
+    sendJSON(res, { query: q, items, imageCount: items.length });
+  } catch (err) {
+    sendError(res, 500, `Search error: ${err.message}`);
+  }
+}
+
+// ── Route: GET /api/image-tags?path=...&file=... ──────────────────────────────
+function handleGetImageTags(req, res, url) {
+  const relPath = url.searchParams.get('path') || '';
+  const file = url.searchParams.get('file') || '';
+  if (!file) return sendError(res, 400, 'Missing file param');
+
+  try {
+    const rel = tagDb.toRelPath(relPath, file);
+    const tags = tagDb.getImageTags(getDb(), rel);
+    sendJSON(res, { path: relPath, file, tags });
+  } catch (err) {
+    sendError(res, 500, `Tag database error: ${err.message}`);
+  }
+}
+
+// ── Route: POST /api/image-tags ───────────────────────────────────────────────
+// Body: { path, file, tags: string[] }. Replaces the full tag set for one
+// image (the lightbox tag editor sends the whole list on every change).
+async function handleSetImageTags(req, res) {
+  let body;
+  try {
+    const raw = await readBody(req);
+    body = JSON.parse(raw || '{}');
+  } catch {
+    return sendError(res, 400, 'Invalid JSON body');
+  }
+
+  const relPath = typeof body.path === 'string' ? body.path : '';
+  const file = typeof body.file === 'string' ? body.file : '';
+  const tags = body.tags;
+
+  if (!file) return sendError(res, 400, 'Missing file');
+  if (!Array.isArray(tags) || !tags.every((t) => typeof t === 'string')) {
+    return sendError(res, 400, 'tags must be an array of strings');
+  }
+
+  // Reuse the same path-containment check as file serving, so tags can only
+  // be attached to files actually inside ROOT_DIR.
+  const dirAbs = safePath(relPath);
+  if (!dirAbs) return sendError(res, 403, 'Forbidden');
+  const fileAbs = path.join(dirAbs, file);
+  if (!fileAbs.startsWith(ROOT_DIR)) return sendError(res, 403, 'Forbidden');
+
+  try {
+    const rel = tagDb.toRelPath(relPath, file);
+    const updated = tagDb.setImageTags(getDb(), rel, tags);
+    sendJSON(res, { path: relPath, file, tags: updated });
+  } catch (err) {
+    sendError(res, 500, `Tag database error: ${err.message}`);
+  }
+}
+
 // ── Static file server (serves /public/*) ────────────────────────────────────
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -232,15 +383,27 @@ function handleStatic(req, res, pathname) {
 const server = http.createServer((req, res) => {
   // CORS for dev convenience
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-  if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname;
 
-  if (pathname === '/api/list') handleList(req, res, url);
-  else if (pathname === '/api/file') handleFile(req, res, url);
-  else handleStatic(req, res, pathname);
+  if (req.method === 'GET') {
+    if (pathname === '/api/list') return handleList(req, res, url);
+    if (pathname === '/api/file') return handleFile(req, res, url);
+    if (pathname === '/api/tags') return handleTags(req, res, url);
+    if (pathname === '/api/search') return handleSearch(req, res, url);
+    if (pathname === '/api/image-tags') return handleGetImageTags(req, res, url);
+    return handleStatic(req, res, pathname);
+  }
+
+  if (req.method === 'POST' && pathname === '/api/image-tags') {
+    return handleSetImageTags(req, res);
+  }
+
+  res.writeHead(405); res.end();
 });
 
 server.listen(PORT, () => {

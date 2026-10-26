@@ -17,6 +17,14 @@
       <nav class="breadcrumb" id="breadcrumb" aria-label="breadcrumb"></nav>
     </div>
     <div class="topbar-right">
+      <div class="search-wrap">
+        <input type="text" id="searchInput" class="search-input"
+          placeholder="Search filenames or tags… (try tag:grass)" autocomplete="off" />
+        <button class="search-clear" id="searchClear" title="Clear search" hidden>✕</button>
+      </div>
+      <button class="btn-toggle" id="btnTags" title="Browse tags">
+        <span class="btn-label">🏷 Tags</span>
+      </button>
       <button class="btn-toggle" id="toggleMasonry" title="Toggle masonry">
         <!-- <span class="icon-eye"></span> -->
         <span class="btn-label">Toggle masonry</span>
@@ -51,20 +59,44 @@
       <div class="lb-spinner" id="lbSpinner"></div>
     </div>
 
-    <!-- Zoom / rotate toolbar -->
-    <div class="lb-toolbar" id="lbToolbar">
-      <button class="lb-tool" id="lbZoomOut" title="Zoom out (-)">−</button>
-      <span class="lb-zoom-level" id="lbZoomLevel">100%</span>
-      <button class="lb-tool" id="lbZoomIn" title="Zoom in (+)">+</button>
-      <span class="lb-tool-sep"></span>
-      <button class="lb-tool" id="lbRotateLeft" title="Rotate left (Shift+R)">⟲</button>
-      <button class="lb-tool" id="lbRotateRight" title="Rotate right (R)">⟳</button>
-      <span class="lb-tool-sep"></span>
-      <button class="lb-tool" id="lbReset" title="Reset view (0)">⤾ Reset</button>
-    </div>
+    <!-- Bottom bar: caption, counter, tag editor, zoom/rotate toolbar -->
+    <div class="lb-bottom" id="lbBottom">
+      <div class="lb-caption" id="lbCaption"></div>
+      <div class="lb-counter" id="lbCounter"></div>
 
-    <div class="lb-caption" id="lbCaption"></div>
-    <div class="lb-counter" id="lbCounter"></div>
+      <div class="lb-tags" id="lbTags">
+        <div class="lb-tags-list" id="lbTagsList"></div>
+        <div class="lb-tags-input-row">
+          <input type="text" id="lbTagInput" class="lb-tag-input" placeholder="Add tag… (Enter)" autocomplete="off" />
+          <span class="lb-tags-status" id="lbTagsStatus"></span>
+        </div>
+      </div>
+
+      <div class="lb-toolbar" id="lbToolbar">
+        <button class="lb-tool" id="lbZoomOut" title="Zoom out (-)">−</button>
+        <span class="lb-zoom-level" id="lbZoomLevel">100%</span>
+        <button class="lb-tool" id="lbZoomIn" title="Zoom in (+)">+</button>
+        <span class="lb-tool-sep"></span>
+        <button class="lb-tool" id="lbRotateLeft" title="Rotate left (Shift+R)">⟲</button>
+        <button class="lb-tool" id="lbRotateRight" title="Rotate right (R)">⟳</button>
+        <span class="lb-tool-sep"></span>
+        <button class="lb-tool" id="lbReset" title="Reset view (0)">⤾ Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tags modal ───────────────────────────────────────────────────────── -->
+  <div class="modal" id="tagsModal" role="dialog" aria-modal="true" aria-label="Browse tags" hidden>
+    <div class="modal-backdrop" id="tagsModalBackdrop"></div>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>Top tags</h2>
+        <button class="modal-close" id="tagsModalClose" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="tagsModalBody">
+        <div class="modal-loading">loading…</div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

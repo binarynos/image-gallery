@@ -7,6 +7,14 @@ const state = {
   totalPages: 1,
   imageNames: [],
   showNonImages: true,
+  // Unified list of { dir, name } the lightbox can page through — rebuilt
+  // whenever the folder view or a search result set loads, so prev/next
+  // works the same way in both modes.
+  lbSource: [],
+  search: {
+    active: false,
+    query: '',
+  },
   lb: {
     open: false,
     index: 0,
@@ -14,6 +22,9 @@ const state = {
     rotate: 0,     // degrees, multiple of 90
     panX: 0,
     panY: 0,
+    currentDir: undefined,
+    currentName: undefined,
+    tags: [],
   },
 };
 
@@ -50,6 +61,19 @@ const lbRotateLeft = $('lbRotateLeft');
 const lbRotateRight = $('lbRotateRight');
 const lbReset = $('lbReset');
 
+const searchInput = $('searchInput');
+const searchClear = $('searchClear');
+const btnTags = $('btnTags');
+
+const tagsModal = $('tagsModal');
+const tagsModalBackdrop = $('tagsModalBackdrop');
+const tagsModalClose = $('tagsModalClose');
+const tagsModalBody = $('tagsModalBody');
+
+const lbTagsList = $('lbTagsList');
+const lbTagInput = $('lbTagInput');
+const lbTagsStatus = $('lbTagsStatus');
+
 // ── API ───────────────────────────────────────────────────────────────────────
 async function fetchList(path, page) {
   const params = new URLSearchParams({ path, page });
@@ -64,6 +88,7 @@ function thumbURL(path, file, size) {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 async function navigate(path, page = 1) {
+  exitSearchUI();
   state.path = path;
   state.page = page;
   await loadPage();
@@ -76,6 +101,7 @@ async function loadPage() {
     state.totalPages = data.totalPages;
     state.page = data.page;
     state.imageNames = data.imageNames;
+    state.lbSource = data.imageNames.map(name => ({ dir: state.path, name }));
     renderBreadcrumb(data.breadcrumb);
     renderStatus(data);
     renderGrid(data.items);
@@ -83,10 +109,104 @@ async function loadPage() {
     const url = new URL(location.href);
     url.searchParams.set('path', state.path);
     url.searchParams.set('page', String(state.page));
+    url.searchParams.delete('q');
     history.pushState({ path: state.path, page: state.page }, '', url);
   } catch (err) {
     renderError(err.message);
   }
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+async function fetchSearch(q) {
+  const params = new URLSearchParams({ q });
+  const res = await fetch(`/api/search?${params}`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  return res.json();
+}
+
+function exitSearchUI() {
+  state.search.active = false;
+  state.search.query = '';
+  searchInput.value = '';
+  searchClear.hidden = true;
+}
+
+async function runSearch(rawQuery, pushHistory = true) {
+  const q = rawQuery.trim();
+  if (!q) {
+    exitSearchUI();
+    await loadPage();
+    return;
+  }
+
+  searchInput.value = rawQuery;
+  searchClear.hidden = false;
+  state.search.active = true;
+  state.search.query = q;
+
+  renderLoading();
+  breadcrumb.innerHTML = '';
+  pagination.innerHTML = '';
+
+  try {
+    const data = await fetchSearch(q);
+    state.lbSource = data.items.map(it => ({ dir: it.dir, name: it.name }));
+    renderSearchStatus(data);
+    renderSearchGrid(data.items);
+    if (pushHistory) {
+      const url = new URL(location.href);
+      url.searchParams.set('q', q);
+      url.searchParams.delete('path');
+      url.searchParams.delete('page');
+      history.pushState({ search: q }, '', url);
+    }
+  } catch (err) {
+    renderError(err.message);
+  }
+}
+
+function renderSearchStatus(data) {
+  statusBar.innerHTML = `
+    <span>search: <span class="count-accent">"${escHtml(data.query)}"</span></span>
+    <span><span class="count-accent">${data.imageCount}</span> result${data.imageCount === 1 ? '' : 's'}</span>
+  `;
+}
+
+function renderSearchGrid(items) {
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-state">No images match your search.</div>';
+    return;
+  }
+  grid.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  items.forEach((item, idx) => {
+    frag.appendChild(makeImage({ name: item.name }, item.dir, idx));
+  });
+  grid.appendChild(frag);
+}
+
+let searchDebounce = null;
+searchInput.addEventListener('input', () => {
+  searchClear.hidden = !searchInput.value;
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => runSearch(searchInput.value), 300);
+});
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    clearTimeout(searchDebounce);
+    runSearch(searchInput.value);
+  } else if (e.key === 'Escape') {
+    searchInput.blur();
+  }
+});
+searchClear.addEventListener('click', () => {
+  navigate(state.path, state.page);
+});
+
+function searchForTag(tagName) {
+  closeLightbox();
+  closeTagsModal();
+  runSearch(`tag:${tagName}`);
 }
 
 // ── Rendering: Breadcrumb ─────────────────────────────────────────────────────
@@ -143,7 +263,7 @@ function renderGrid(items) {
     if (item.type === 'dir') {
       card = makeDir(item);
     } else if (item.type === 'image') {
-      card = makeImage(item);
+      card = makeImage(item, state.path, state.imageNames.indexOf(item.name));
     } else {
       card = makeFile(item);
     }
@@ -185,7 +305,11 @@ function makeFile(item) {
   return card;
 }
 
-function makeImage(item) {
+// `dir` is the folder this image lives in (relative to the gallery root);
+// `lbIndex` is this image's index into state.lbSource, used to open the
+// lightbox at the right spot and let it page through the same result set
+// (a folder listing or a search's results) via prev/next.
+function makeImage(item, dir, lbIndex) {
   const card = document.createElement('div');
   card.className = 'card card-image';
   card.title = item.name;
@@ -210,7 +334,7 @@ function makeImage(item) {
   img.addEventListener('error', () => {
     ph.textContent = '✕';
   });
-  img.src = thumbURL(state.path, item.name, 200);
+  img.src = thumbURL(dir, item.name, 200);
   wrap.appendChild(img);
 
   const name = document.createElement('div');
@@ -221,8 +345,7 @@ function makeImage(item) {
   card.appendChild(name);
 
   card.addEventListener('click', () => {
-    const imgIndex = state.imageNames.indexOf(item.name);
-    openLightbox(imgIndex >= 0 ? imgIndex : 0);
+    openLightbox(lbIndex >= 0 ? lbIndex : 0);
   });
 
   return card;
@@ -304,6 +427,7 @@ toggleMasonryBtn.addEventListener('click', toggleMasonry)
 
 // ── Lightbox: open / close ────────────────────────────────────────────────────
 function openLightbox(index) {
+  if (!state.lbSource.length) return;
   state.lb.open = true;
   lightbox.hidden = false;
   document.body.style.overflow = 'hidden';
@@ -318,24 +442,24 @@ function closeLightbox() {
 }
 
 function showLbImage(index, resetTransform = true) {
-  const images = state.imageNames;
-  if (!images.length) return;
-  const clamp = i => Math.max(0, Math.min(images.length - 1, i));
+  const items = state.lbSource;
+  if (!items.length) return;
+  const clamp = i => Math.max(0, Math.min(items.length - 1, i));
   index = clamp(index);
   state.lb.index = index;
 
   if (resetTransform) resetLbTransform(/*apply*/ false);
 
-  const name = images[index];
-  lbCaption.textContent = name;
-  lbCounter.textContent = `${index + 1} / ${images.length}`;
+  const { dir, name } = items[index];
+  lbCaption.textContent = state.search.active && dir ? `${dir}/${name}` : name;
+  lbCounter.textContent = `${index + 1} / ${items.length}`;
   lbPrev.disabled = index === 0;
-  lbNext.disabled = index === images.length - 1;
+  lbNext.disabled = index === items.length - 1;
 
   lbImg.classList.add('fading');
   lbSpinner.classList.add('visible');
 
-  const url = thumbURL(state.path, name);
+  const url = thumbURL(dir, name);
   const tmp = new Image();
   tmp.onload = tmp.onerror = () => {
     lbImg.src = url;
@@ -345,6 +469,8 @@ function showLbImage(index, resetTransform = true) {
     applyLbTransform();
   };
   tmp.src = url;
+
+  loadLbTags(dir, name);
 }
 
 function lbStep(delta) {
@@ -499,12 +625,165 @@ lbImgWrap.addEventListener('dblclick', () => {
   }, { passive: true });
 })();
 
+// ── Lightbox: tag editor ─────────────────────────────────────────────────────
+function tagsURL(dir, file) {
+  return `/api/image-tags?${new URLSearchParams({ path: dir, file })}`;
+}
+
+async function loadLbTags(dir, name) {
+  state.lb.currentDir = dir;
+  state.lb.currentName = name;
+  state.lb.tags = [];
+  lbTagsList.innerHTML = '';
+  lbTagsStatus.textContent = 'loading tags…';
+
+  try {
+    const res = await fetch(tagsURL(dir, name));
+    if (!res.ok) throw new Error('failed to load');
+    const data = await res.json();
+    // Guard against a slow response landing after the user has already
+    // moved on to a different image.
+    if (state.lb.currentDir !== dir || state.lb.currentName !== name) return;
+    state.lb.tags = data.tags || [];
+    renderLbTags();
+    lbTagsStatus.textContent = '';
+  } catch {
+    if (state.lb.currentDir !== dir || state.lb.currentName !== name) return;
+    lbTagsStatus.textContent = 'tags unavailable';
+  }
+}
+
+function renderLbTags() {
+  lbTagsList.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  state.lb.tags.forEach(tag => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip';
+
+    const label = document.createElement('span');
+    label.className = 'tag-chip-label';
+    label.textContent = tag;
+    label.title = `Find all images tagged "${tag}"`;
+    label.addEventListener('click', () => searchForTag(tag));
+
+    const remove = document.createElement('button');
+    remove.className = 'tag-chip-remove';
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = `Remove tag "${tag}"`;
+    remove.addEventListener('click', () => removeLbTag(tag));
+
+    chip.appendChild(label);
+    chip.appendChild(remove);
+    frag.appendChild(chip);
+  });
+  lbTagsList.appendChild(frag);
+}
+
+async function saveLbTags() {
+  const { currentDir, currentName, tags } = state.lb;
+  if (currentName === undefined) return;
+  lbTagsStatus.textContent = 'saving…';
+  try {
+    const res = await fetch('/api/image-tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: currentDir, file: currentName, tags }),
+    });
+    if (!res.ok) throw new Error('save failed');
+    const data = await res.json();
+    if (state.lb.currentDir !== currentDir || state.lb.currentName !== currentName) return;
+    state.lb.tags = data.tags;
+    renderLbTags();
+    lbTagsStatus.textContent = 'saved';
+    setTimeout(() => { if (lbTagsStatus.textContent === 'saved') lbTagsStatus.textContent = ''; }, 1200);
+  } catch {
+    lbTagsStatus.textContent = 'save failed';
+  }
+}
+
+function addLbTag(raw) {
+  const tag = raw.trim();
+  if (!tag) return;
+  if (!state.lb.tags.some(t => t.toLowerCase() === tag.toLowerCase())) {
+    state.lb.tags.push(tag);
+    renderLbTags();
+    saveLbTags();
+  }
+}
+
+function removeLbTag(tag) {
+  state.lb.tags = state.lb.tags.filter(t => t !== tag);
+  renderLbTags();
+  saveLbTags();
+}
+
+lbTagInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addLbTag(lbTagInput.value);
+    lbTagInput.value = '';
+  }
+});
+
+// ── Tags modal (browse most-common tags) ─────────────────────────────────────
+async function openTagsModal() {
+  tagsModal.hidden = false;
+  tagsModalBody.innerHTML = '<div class="modal-loading">loading…</div>';
+  try {
+    const res = await fetch('/api/tags?limit=40');
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+    renderTagsModal(data.tags);
+  } catch (err) {
+    tagsModalBody.innerHTML = `<div class="empty-state">⚠ ${escHtml(err.message)}</div>`;
+  }
+}
+
+function closeTagsModal() {
+  tagsModal.hidden = true;
+}
+
+function renderTagsModal(tags) {
+  if (!tags.length) {
+    tagsModalBody.innerHTML = '<div class="empty-state">No tags yet. Tag some images to see them here.</div>';
+    return;
+  }
+  tagsModalBody.innerHTML = '';
+  const cloud = document.createElement('div');
+  cloud.className = 'tag-cloud';
+  tags.forEach(t => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'tag-pill';
+    pill.innerHTML = `<span class="tag-pill-name">${escHtml(t.name)}</span><span class="tag-pill-count">${t.count}</span>`;
+    pill.addEventListener('click', () => searchForTag(t.name));
+    cloud.appendChild(pill);
+  });
+  tagsModalBody.appendChild(cloud);
+}
+
+btnTags.addEventListener('click', openTagsModal);
+tagsModalClose.addEventListener('click', closeTagsModal);
+tagsModalBackdrop.addEventListener('click', closeTagsModal);
+
 // Keyboard navigation + zoom/rotate shortcuts
 document.addEventListener('keydown', e => {
+  if (!tagsModal.hidden && e.key === 'Escape') { closeTagsModal(); return; }
+
   if (e.altKey && e.key === 'g') {
     toggleMasonry();
   }
   if (!state.lb.open) return;
+
+  // Don't hijack typing in the tag input (or any other focused field) with
+  // lightbox shortcuts — only Escape should still act (blur the field).
+  const typingTarget = e.target === lbTagInput || e.target === searchInput;
+  if (typingTarget) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+
   switch (e.key) {
     case 'Escape': closeLightbox(); break;
     case 'ArrowLeft': lbStep(-1); break;
@@ -526,8 +805,16 @@ document.addEventListener('keydown', e => {
 // ── Browser history ───────────────────────────────────────────────────────────
 window.addEventListener('popstate', e => {
   const s = e.state;
-  if (s) navigate(s.path, s.page);
-  else navigate('', 1);
+  if (s && typeof s.search === 'string') {
+    runSearch(s.search, /*pushHistory*/ false);
+  } else if (s) {
+    exitSearchUI();
+    state.path = s.path;
+    state.page = s.page;
+    loadPage();
+  } else {
+    navigate('', 1);
+  }
 });
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
@@ -563,6 +850,11 @@ function showToast(msg, duration = 3000) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 (function init() {
   const url = new URL(location.href);
+  const q = url.searchParams.get('q');
+  if (q) {
+    runSearch(q, /*pushHistory*/ false);
+    return;
+  }
   const path = url.searchParams.get('path') || '';
   const page = parseInt(url.searchParams.get('page') || '1', 10);
   navigate(path, page);

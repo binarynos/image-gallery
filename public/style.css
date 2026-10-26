@@ -600,25 +600,32 @@ body {
   right: 16px;
 }
 
-.lb-caption {
+/* ── Lightbox bottom bar (caption, counter, tags, toolbar) ───────────────────── */
+.lb-bottom {
   position: absolute;
-  bottom: 84px;
-  z-index: 2;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(640px, calc(100vw - 32px));
+}
+
+.lb-caption {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
-  padding: 0 80px;
-  max-width: 800px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .lb-counter {
-  position: absolute;
-  bottom: 60px;
-  z-index: 2;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--border);
@@ -627,8 +634,6 @@ body {
 
 /* ── Lightbox toolbar (zoom / rotate) ───────────────────────────────────────── */
 .lb-toolbar {
-  position: absolute;
-  bottom: 16px;
   z-index: 3;
   display: flex;
   align-items: center;
@@ -741,17 +746,274 @@ body {
     padding: 12px;
   }
 
+  .lb-bottom {
+    bottom: 8px;
+    gap: 6px;
+    width: calc(100vw - 16px);
+  }
+
   .lb-toolbar {
     transform: scale(.92);
-    bottom: 10px;
+  }
+}
+
+/* ── Search ──────────────────────────────────────────────────────────────────── */
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input {
+  width: 220px;
+  max-width: 34vw;
+  padding: 6px 28px 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color var(--trans), width var(--trans);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: var(--text);
+}
+
+/* ── Modal (tags browser) ───────────────────────────────────────────────────── */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(640px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .6);
+  overflow: hidden;
+  animation: toastIn 160ms ease;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: .04em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.modal-loading {
+  text-align: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 48px 0;
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-pill {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color var(--trans), color var(--trans), background var(--trans);
+}
+
+.tag-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(245, 166, 35, .08);
+}
+
+.tag-pill-count {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.tag-pill:hover .tag-pill-count {
+  color: var(--accent2);
+}
+
+/* ── Lightbox tag editor ─────────────────────────────────────────────────────── */
+.lb-tags {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.lb-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  max-height: 72px;
+  overflow-y: auto;
+}
+
+.tag-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 3px 4px 3px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.tag-chip-label {
+  cursor: pointer;
+}
+
+.tag-chip-label:hover {
+  color: var(--accent);
+}
+
+.tag-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 7px;
+}
+
+.tag-chip-remove:hover {
+  color: var(--danger);
+}
+
+.lb-tags-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lb-tag-input {
+  width: 180px;
+  padding: 5px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.lb-tag-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.lb-tags-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 44px;
+}
+
+@media (max-width: 600px) {
+  .search-input {
+    width: 140px;
   }
 
-  .lb-caption {
-    bottom: 70px;
-    padding: 0 50px;
+  .lb-tags-list {
+    max-height: 56px;
   }
 
-  .lb-counter {
-    bottom: 50px;
+  .lb-tag-input {
+    width: 120px;
   }
 }
